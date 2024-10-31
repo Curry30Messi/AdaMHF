@@ -1,0 +1,1 @@
+srun -N 1 -n 1 -c 4 -t 36:00:00 --mem-per-cpu=8G --gres=gpu:a100:1 -p gpusmall --account=project_xxxxxx python main.py --which_splits 5foldcv --dataset tcga_xxxx --data_root_dir /data --model AdaMHF --num_epoch 30 --batch_size 1 --lr 0.01 --optimizer SGD --scheduler None --alpha 1.0 --tokenS both --modality Both --weight_decay 0.0001

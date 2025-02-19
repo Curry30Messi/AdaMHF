@@ -1,17 +1,26 @@
 # AdaMHF
+Adaptive Multi-modal Hierarchical Fusion for Survival Analysis
 
+![Model Architecture](./model.png)
 
-### Pre-requisites:
+## Overview
+AdaMHF (Adaptive Multimodal Hierarchical Fusion for Survival Prediction) is a deep learning framework designed for survival analysis using multi-modal data from whole slide images (WSIs) and genomic profiles. The framework adaptively fuses features from different modalities to improve survival prediction accuracy.
+
+## Installation
+### Prerequisites
 ```bash
-torch 1.12.1+cu113
-scikit-survival 0.19.0
+Python >= 3.7
+PyTorch >= 1.12.1+cu113
+scikit-survival >= 0.19.0
 ```
-### Prepare your data
-#### WSIs
-1. Download WSIs from [TCGA](https://portal.gdc.cancer.gov/)
-2. Use the WSI processing tool provided by [CLAM](https://github.com/mahmoodlab/CLAM) to extract features.
 
-The structure of WSIs data should be as following:
+### Data Preparation
+#### Whole Slide Images (WSIs)
+1. Download WSIs from [TCGA](https://portal.gdc.cancer.gov/)
+2. Extract features using the WSI processing pipeline from [CLAM](https://github.com/mahmoodlab/CLAM)
+3. Save extracted features as .pt files for each WSI
+
+Required data structure:
 ```bash
 DATA_ROOT_DIR/
     └──pt_files/
@@ -19,24 +28,37 @@ DATA_ROOT_DIR/
         ├── slide2.pt
         └── ...
 ```
+Note: Specify DATA_ROOT_DIR using the --data_root_dir argument in run.sh
 
-#### Genomics
-In this AdaMHF, we directly use the genomic profiles provided by [PIBD](https://github.com/zylbuaa/PIBD), which should be stored in folder csv.
+#### Genomic Data
+The framework uses genomic profiles provided by [PIBD](https://github.com/zylbuaa/PIBD). Store these profiles in the csv/ directory.
 
-## Training-Validation Splits
-We employ five-fold cross-validation, for which the splits should be prepared in advance and placed in the `splits/5foldcv` folder.
+## Cross-Validation
+The model employs 5-fold cross-validation. Prepare the splits in advance and store them in the `splits/5foldcv` directory.
 
-
-
-## Running Experiments
-To train AdaMHF, you can specify the argument in the bash `run.sh` and run the command:
+## Training
+To train the model:
 ```bash
 bash run.sh
 ```
+Customize training parameters by modifying run.sh
+
+## Model Performance
+[ To be added ]
+
+## Citation
+If you find this work useful, please cite our paper:
+```
+[Citation details to be added]
+```
+
 ## Acknowledgements
-Huge thanks to the authors of following open-source projects:
-- [CLAM](https://github.com/mahmoodlab/CLAM)
-- [PIBD](https://github.com/zylbuaa/PIBD)
-- [CMTA](https://github.com/FT-ZHOU-ZZZ/CMTA)
-# The complete README file will be released shortly.
+We thank the authors of the following open-source projects:
+- [CLAM](https://github.com/mahmoodlab/CLAM) - For WSI processing pipeline
+- [PIBD](https://github.com/zylbuaa/PIBD) - For genomic profile processing
+- [CMTA](https://github.com/FT-ZHOU-ZZZ/CMTA) - For multi-modal learning insights
+
+
+## Contact
+For questions and issues, please open an issue in this repository.
 

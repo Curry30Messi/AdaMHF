@@ -12,20 +12,20 @@ from scheduler import define_scheduler
 from datetime import datetime
 
 
-def get_commit_hash(repo_path):
-    try:
-        head_file_path = os.path.join(repo_path, '.git', 'HEAD')
-        with open(head_file_path, 'r') as file:
-            ref = file.read().strip()
+# def get_commit_hash(repo_path):
+#     try:
+#         head_file_path = os.path.join(repo_path, '.git', 'HEAD')
+#         with open(head_file_path, 'r') as file:
+#             ref = file.read().strip()
 
-        if ref.startswith('ref: '):
-            ref_path = os.path.join(repo_path, '.git', ref[5:])
-            with open(ref_path, 'r') as file:
-                commit_hash = file.read().strip()
-            return commit_hash
-        return ref
-    except Exception as error:
-        print(f"Exception: {error}")
+#         if ref.startswith('ref: '):
+#             ref_path = os.path.join(repo_path, '.git', ref[5:])
+#             with open(ref_path, 'r') as file:
+#                 commit_hash = file.read().strip()
+#             return commit_hash
+#         return ref
+#     except Exception as error:
+#         print(f"Exception: {error}")
 
 
 class FlushFile:
@@ -62,10 +62,10 @@ def main(args):
     repo_path = os.getcwd()
     commit_hash = get_commit_hash(repo_path)
 
-    print("=======================================")
+    # print("=======================================")
     print("Parameters:", vars(args))
-    print("Git info:", commit_hash)
-    print("=======================================")
+    # print("Git info:", commit_hash)
+    # print("=======================================")
 
     temp_time = current_time()
 

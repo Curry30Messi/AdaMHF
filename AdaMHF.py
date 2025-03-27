@@ -6,6 +6,25 @@ from util import initialize_weights, NystromAttention, BilinearFusion, SNN_Block
 from torchvision.models import vit_large_patch16_224
 
 
+
+class TransLayer(nn.Module):
+    def __init__(self, norm_layer=nn.LayerNorm, dim=512):
+        super(TransLayer, self).__init__()
+        self.norm = norm_layer(dim)
+        self.attn = NystromAttention(
+            dim=dim,
+            dim_head=dim // 8,
+            heads=8,
+            num_landmarks=dim // 2,
+            pinv_iterations=6,
+            residual=True,
+            dropout=0.1,
+        )
+
+    def forward(self, x):
+        x = x + self.attn(self.norm(x))
+        return x
+
 class CNNExpert(nn.Module):
     def __init__(self, in_dim, hidden_dim):
         super(CNNExpert, self).__init__()
@@ -33,23 +52,6 @@ class SNNExpert(nn.Module):
         return x
 
 
-class TransLayer(nn.Module):
-    def __init__(self, norm_layer=nn.LayerNorm, dim=512):
-        super(TransLayer, self).__init__()
-        self.norm = norm_layer(dim)
-        self.attn = NystromAttention(
-            dim=dim,
-            dim_head=dim // 8,
-            heads=8,
-            num_landmarks=dim // 2,
-            pinv_iterations=6,
-            residual=True,
-            dropout=0.1,
-        )
-
-    def forward(self, x):
-        x = x + self.attn(self.norm(x))
-        return x
 
 
 class FixedMLP(nn.Module):
@@ -68,6 +70,9 @@ class FixedMLP(nn.Module):
         )
         self._initialize_weights(encoder_layer)
 
+        for param in self.mlp.parameters():
+            param.requires_grad = False
+
     def _initialize_weights(self, encoder_layer):
         with torch.no_grad():
             self.mlp[0].weight.copy_(encoder_layer.fc1.weight.data)
@@ -79,44 +84,118 @@ class FixedMLP(nn.Module):
         return self.mlp(x)
 
 
-class PREEG(nn.Module):
-    def __init__(self, expert_dims, num_experts):
-        super(PREEG, self).__init__()
-        self.fixed_mlp = FixedMLP()
-        self.experts_g = nn.ModuleList([SNNExpert(expert_dims['input_dim'], expert_dims['hidden_dim']) for _ in range(num_experts)])
-        self.gate = nn.Sigmoid()
-
-    def forward(self, x, gated_input):
-        out = self.fixed_mlp(x)
-        for expert in self.experts_g:
-            gated_expert_out = self.gate(gated_input) * expert(out)
-            out = out + gated_expert_out
-        return out
-
-
 class PREEP(nn.Module):
-    def __init__(self, expert_dims, num_experts):
+    def __init__(self, feature_dim, hidden_dim, num_layers=3, num_experts_per_layer=[1, 2, 4]):
         super(PREEP, self).__init__()
-        self.fixed_mlp = FixedMLP()
-        self.experts_p = nn.ModuleList([CNNExpert(expert_dims['input_dim'], expert_dims['hidden_dim']) for _ in range(num_experts)])
-        self.gate = nn.Sigmoid()
+        self.num_layers = num_layers
+        self.num_experts_per_layer = num_experts_per_layer
+        
+        self.frozen_mlps = nn.ModuleList([FixedMLP() for _ in range(num_layers)])
+        
+        self.expert_layers = nn.ModuleList()
+        for i in range(num_layers):
+            experts = nn.ModuleList([
+                CNNExpert(feature_dim, hidden_dim) 
+                for _ in range(num_experts_per_layer[i])
+            ])
+            self.expert_layers.append(experts)
+        
+        self.gate_controllers = nn.ModuleList()
+        for i in range(num_layers):
+            self.gate_controllers.append(
+                nn.Sequential(
+                    nn.Linear(feature_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, num_experts_per_layer[i]),
+                    nn.Softmax(dim=1)
+                )
+            )
+        
+        self.activation = nn.ReLU()
+        
+    def forward(self, x):
+        batch_size = x.shape[0]
+        
+        for layer_idx in range(self.num_layers):
+            mlp_out = self.frozen_mlps[layer_idx](x)
+            
+            gate_scores = self.gate_controllers[layer_idx](x.mean(dim=1) if len(x.shape) > 2 else x)
+            max_indices = torch.argmax(gate_scores, dim=1)
+            
+            layer_output = torch.zeros_like(mlp_out)
+            for b in range(batch_size):
+                selected_expert = self.expert_layers[layer_idx][max_indices[b]]
+                if len(mlp_out.shape) > 2:
+                    layer_output[b] = selected_expert(mlp_out[b].unsqueeze(0)).squeeze(0)
+                else:
+                    layer_output[b] = selected_expert(mlp_out[b:b+1]).squeeze(0)
+            
+            x = mlp_out + layer_output
+            x = self.activation(x)
+            
+        return x
 
-    def forward(self, x, gated_input):
-        out = self.fixed_mlp(x)
-        for expert in self.experts_p:
-            gated_expert_out = self.gate(gated_input) * expert(out)
-            out = out + gated_expert_out
-        return out
+
+class PREEG(nn.Module):
+    def __init__(self, feature_dim, hidden_dim, num_layers=3, num_experts_per_layer=[1, 2, 4]):
+        super(PREEG, self).__init__()
+        self.num_layers = num_layers
+        self.num_experts_per_layer = num_experts_per_layer
+        
+        self.frozen_mlps = nn.ModuleList([FixedMLP() for _ in range(num_layers)])
+        
+        self.expert_layers = nn.ModuleList()
+        for i in range(num_layers):
+            experts = nn.ModuleList([
+                SNNExpert(feature_dim, hidden_dim) 
+                for _ in range(num_experts_per_layer[i])
+            ])
+            self.expert_layers.append(experts)
+        
+        self.gate_controllers = nn.ModuleList()
+        for i in range(num_layers):
+            self.gate_controllers.append(
+                nn.Sequential(
+                    nn.Linear(feature_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, num_experts_per_layer[i]),
+                    nn.Softmax(dim=1)
+                )
+            )
+        
+        self.activation = nn.ReLU()
+        
+    def forward(self, x):
+        batch_size = x.shape[0]
+        
+        for layer_idx in range(self.num_layers):
+            mlp_out = self.frozen_mlps[layer_idx](x)
+            
+            gate_scores = self.gate_controllers[layer_idx](x.mean(dim=1) if len(x.shape) > 2 else x)
+            max_indices = torch.argmax(gate_scores, dim=1)
+            
+            layer_output = torch.zeros_like(mlp_out)
+            for b in range(batch_size):
+                selected_expert = self.expert_layers[layer_idx][max_indices[b]]
+                if len(mlp_out.shape) > 2:
+                    layer_output[b] = selected_expert(mlp_out[b].unsqueeze(0)).squeeze(0)
+                else:
+                    layer_output[b] = selected_expert(mlp_out[b:b+1]).squeeze(0)
+            
+            x = mlp_out + layer_output
+            x = self.activation(x)
+            
+        return x
 
 
 class Transformer_P(nn.Module):
-    def __init__(self, feature_dim=512, num_experts=4, k=2, pos='ppeg'):
+    def __init__(self, feature_dim=512, num_experts=4, k=2, pos='epeg'):
         super(Transformer_P, self).__init__()
         self.cls_token = nn.Parameter(torch.randn(1, 1, feature_dim))
         nn.init.normal_(self.cls_token, std=1e-6)
         self.layer1 = TransLayer(dim=feature_dim)
         self.layer2 = TransLayer(dim=feature_dim)
-        self.pree = PREEP(expert_dims={'input_dim': feature_dim, 'hidden_dim': feature_dim}, num_experts=num_experts)
+        self.pree = PREEP(feature_dim, feature_dim)
         self.pos_layer = EPEG(dim=feature_dim, epeg_2d=False)
 
     def forward(self, features):
@@ -143,7 +222,7 @@ class Transformer_G(nn.Module):
         nn.init.normal_(self.cls_token, std=1e-6)
         self.layer1 = TransLayer(dim=feature_dim)
         self.layer2 = TransLayer(dim=feature_dim)
-        self.pree = PREEG(expert_dims={'input_dim': feature_dim, 'hidden_dim': feature_dim}, num_experts=num_experts)
+        self.pree = PREEG(feature_dim, feature_dim)
 
     def forward(self, features):
         height = features.shape[1]
@@ -202,30 +281,55 @@ class RouterK(nn.Module):
 
 
 class ATSA(nn.Module):
-    def __init__(self, in_dim, alpha, k, hidden_dim):
+    def __init__(self, in_dim, alpha=0.5, k=10, hidden_dim=256):
         super(ATSA, self).__init__()
-        self.router_alpha = RouterAlpha(alpha, k)
-        self.router_k = RouterK(alpha, k)
-        self.mlp1 = nn.Sequential(
+        self.alpha = alpha
+        self.k = k
+        
+        self.priority_allocator = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
+            nn.Softmax(dim=1)
         )
-        self.softmax = nn.Softmax(dim=-1)
-        self.concat_layer = nn.Linear(2 * hidden_dim, hidden_dim)
-        self.mlp2 = nn.Sequential(
-            nn.Linear(hidden_dim, in_dim),
-            nn.ReLU()
+        
+        self.selective_refiner = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, in_dim)
         )
+        
+        self.adaptive_pool = nn.AdaptiveAvgPool1d(1)
+        
+        self.fusion_layer = nn.Linear(in_dim, in_dim)
 
-    def forward(self, tokens):
-        top_alpha_tokens, _ = self.router_alpha(tokens)
-        avg_pooled_tokens = self.router_k(tokens)
-        mlp_output_alpha = self.mlp1(top_alpha_tokens)
-        softmax_output = self.softmax(mlp_output_alpha)
-        concat_output = torch.cat((softmax_output, avg_pooled_tokens), dim=-1)
-        concat_processed = self.concat_layer(concat_output)
-        final_output = self.mlp2(concat_processed)
-        return final_output
+    def forward(self, tokens, cls_token=None, threshold=0.5):
+        B, N, C = tokens.shape
+        
+        token_scores = self.priority_allocator(tokens).squeeze(-1)
+        
+        top_k_values, top_k_indices = torch.topk(token_scores, self.k, dim=1)
+        
+        top_alpha_k = int(self.alpha * self.k)
+        
+        refined_tokens_indices = top_k_indices[:, :top_alpha_k]
+        batch_indices = torch.arange(B).unsqueeze(1).expand(-1, top_alpha_k).to(tokens.device)
+        refined_tokens = tokens[batch_indices, refined_tokens_indices]
+        refined_output = self.selective_refiner(refined_tokens)
+        
+        non_top_k_mask = torch.ones(B, N, device=tokens.device).bool()
+        non_top_k_mask[batch_indices, top_k_indices] = False
+        non_top_tokens = tokens[non_top_k_mask].view(B, -1, C)
+        pooled_output = self.adaptive_pool(non_top_tokens.transpose(1, 2)).transpose(1, 2)
+        
+        remaining_top_indices = top_k_indices[:, top_alpha_k:]
+        batch_indices_remaining = torch.arange(B).unsqueeze(1).expand(-1, self.k - top_alpha_k).to(tokens.device)
+        remaining_top_tokens = tokens[batch_indices_remaining, remaining_top_indices]
+        
+        final_output = torch.cat([refined_output, remaining_top_tokens, pooled_output], dim=1)
+        aggregated_output = self.fusion_layer(final_output.mean(dim=1))
+        
+        return aggregated_output
 
 
 class LMF(nn.Module):
@@ -364,13 +468,13 @@ class AdaMHF(nn.Module):
         )
 
         # Decoder
-        cls_token_pathomics_decoder, _ = self.pathomics_decoder(pathomics_in_genomics.transpose(1, 0))
-        cls_token_genomics_decoder, _ = self.genomics_decoder(genomics_in_pathomics.transpose(1, 0))
+        cls_token_pathomics_decoder, patch_token_pathomics_decoder = self.pathomics_decoder(pathomics_in_genomics.transpose(1, 0))
+        cls_token_genomics_decoder, patch_token_genomics_decoder = self.genomics_decoder(genomics_in_pathomics.transpose(1, 0))
 
         combined_pathomics = (cls_token_pathomics + cls_token_pathomics_decoder) / 2
         combined_genomics = (cls_token_genomics + cls_token_genomics_decoder) / 2
         lmf_layer = LMF(input_dims=(256, 256), output_dim=256, rank=4).to(combined_pathomics.device)
-        output = lmf_layer(combined_pathomics, combined_genomics)
+        output = lmf_layer(patch_token_genomics_decoder, patch_token_genomics_decoder)
 
         output_combined = self.merging_layers(torch.cat(
             (
@@ -378,10 +482,88 @@ class AdaMHF(nn.Module):
                 combined_genomics,
             ), dim=1
         ))
-        final_output = output_combined + output * self.learning_rate
+        final_output = output_combined + output * self.rate
         logits = self.classifier(final_output)
 
         hazards = torch.sigmoid(logits)
         survival_function = torch.cumprod(1 - hazards, dim=1)
 
         return hazards, survival_function, cls_token_pathomics, cls_token_pathomics_decoder, cls_token_genomics, cls_token_genomics_decoder
+
+
+ # elif self.fusion == "Aconcat":
+        #     fusion = self.mm(
+        #         torch.concat(
+        #             (
+        #                 (1 - self.alpha) * (cls_token_pathomics_encoder + cls_token_pathomics_decoder) / 2,
+        #                 self.alpha * (cls_token_genomics_encoder + cls_token_genomics_decoder) / 2,
+        #             ),
+        #             dim=1,
+        #         )
+        #     )  #
+        #     logits = self.classifier(fusion)
+        # elif self.fusion == "fineCoarse":
+        #     fusion_coarse = self.mm(
+        #         torch.concat(
+        #             (
+        #                 cls_token_pathomics_encoder,
+        #                 cls_token_genomics_encoder,
+        #             ),
+        #             dim=1
+        #         )
+        #     )
+        #     fusion_fine = self.mm(
+        #         torch.concat(
+        #             (
+        #                 cls_token_pathomics_decoder,
+        #                 cls_token_genomics_decoder,
+        #             ),
+        #             dim=1
+        #         )
+        #     )
+        #     fusion=self.beta * fusion_fine + (1-self.beta) * fusion_coarse
+        #     logits = self.classifier(fusion)
+        # elif self.fusion == "bilinear":
+        #     fusion = self.mm(
+        #         (cls_token_pathomics_encoder + cls_token_pathomics_decoder) / 2,
+        #         (cls_token_genomics_encoder + cls_token_genomics_decoder) / 2,
+        #     )  # take cls token to make prediction
+        #     logits = self.classifier(fusion)
+        # elif self.fusion == "hyperbolic":
+        #     # Step 1: Compute the average of pathomics encoder and decoder cls tokens
+        #     # print("hyperbolic")
+        #     pathomics_avg = (cls_token_pathomics_encoder + cls_token_pathomics_decoder) / 2
+        #     genomics_avg = (cls_token_genomics_encoder + cls_token_genomics_decoder) / 2
+        #
+        #     # Step 2: Concatenate the averaged features from pathomics and genomics
+        #     concatenated_features = torch.cat((pathomics_avg, genomics_avg), dim=1)
+        #
+        #     # Step 3: Wrap the concatenated features as a tangent vector on the manifold
+        #     tangent_features = TangentTensor(data=concatenated_features, man_dim=1, manifold=manifold)
+        #
+        #     # Step 4: Map the tangent vector to the manifold using the exponential map
+        #     hy_features = manifold.expmap(tangent_features)
+        #
+        #     # Step 5: Apply hyperbolic matrix multiplication to map features within the hyperbolic space
+        #     fusion_hy= self.hyperbolic_mm(hy_features)
+        #
+        #     # Define the origin point on the manifold for logmap
+        #     # origin = torch.zeros_like(fusion_hy.tensor)  # Assuming the origin is a zero tensor of the same shape
+        #
+        #     # Map the fusion tensor back to Euclidean space using the logarithmic map
+        #     # log_mapped_fusion = manifold.logmap(origin, fusion_hy)
+        #
+        #     # Step 7: Retrieve the tensor from the log-mapped structure
+        #
+        #     fusion_e = self.mm(
+        #         torch.concat(
+        #             (
+        #                 (cls_token_pathomics_encoder + cls_token_pathomics_decoder) / 2,
+        #                 (cls_token_genomics_encoder + cls_token_genomics_decoder) / 2,
+        #             ),
+        #             dim=1,
+        #         )
+        #     )  # take cls token to make prediction
+        #
+        #     fusion = fusion_hy.tensor*self.Rate+fusion_e
+        #     logits = self.classifier(fusion)

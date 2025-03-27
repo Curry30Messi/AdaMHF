@@ -228,3 +228,54 @@ class MIL_Survival_Dataset(WSI_Survival_Dataset):
 
     def get_patient_data(self):
         return self.patient_data
+
+
+
+class Generic_Split(MIL_Survival_Dataset):
+    def __init__(self, slide_data, metadata, modal, signatures=None, data_dir=None, label_col=None, patient_dict=None, num_classes=2,OOM=2048):
+        self.use_h5 = False
+        self.slide_data = slide_data
+        self.metadata = metadata
+        self.modal = modal
+        self.data_dir = data_dir
+        self.num_classes = num_classes
+        self.label_col = label_col
+        self.patient_dict = patient_dict
+        self.slide_cls_ids = [[] for i in range(self.num_classes)]
+        self.OOM=OOM
+
+        for i in range(self.num_classes):
+            self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
+
+        # --> Initializing genomic features in Generic Split
+        self.genomic_features = self.slide_data.drop(self.metadata, axis=1)
+        self.signatures = signatures
+
+        def series_intersection(s1, s2):
+            return pd.Series(list(set(s1) & set(s2)))
+
+        if self.signatures is not None:
+            self.omic_names = []
+            for col in self.signatures.columns:
+                omic = self.signatures[col].dropna().unique()
+                omic = np.concatenate([omic+modal for modal in ['_mut', '_cnv', '_rnaseq']])
+                omic = sorted(series_intersection(omic, self.genomic_features.columns))
+                self.omic_names.append(omic)
+            self.omic_sizes = [len(omic) for omic in self.omic_names]
+        print("Shape", self.genomic_features.shape)
+
+    def __len__(self):
+        return len(self.slide_data)
+
+    # --> Getting StandardScaler of self.genomic_features
+    def get_scaler(self):
+        scaler_omic = StandardScaler().fit(self.genomic_features)
+        return (scaler_omic,)
+    # <--
+
+    # --> Applying StandardScaler to self.genomic_features
+    def apply_scaler(self, scalers: tuple = None):
+        transformed = pd.DataFrame(scalers[0].transform(self.genomic_features))
+        transformed.columns = self.genomic_features.columns
+        self.genomic_features = transformed
+    # <--

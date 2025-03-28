@@ -254,82 +254,148 @@ class EPEG(nn.Module):
         return torch.cat((cls_token.unsqueeze(1), x), dim=1)
 
 
-class RouterAlpha(nn.Module):
-    def __init__(self, alpha, k):
-        super(RouterAlpha, self).__init__()
-        self.alpha = alpha
-        self.k = k
-
-    def forward(self, tokens):
-        top_alpha_k = int(self.alpha * self.k)
-        top_values, top_indices = torch.topk(tokens, top_alpha_k, dim=1)
-        return top_values, top_indices
-
-
-class RouterK(nn.Module):
-    def __init__(self, alpha, k):
-        super(RouterK, self).__init__()
-        self.alpha = alpha
-        self.k = k
-
-    def forward(self, tokens):
-        top_1_minus_alpha_k = int((1 - self.alpha) * self.k)
-        _, indices = torch.topk(tokens, self.k, dim=1)
-        normally_dropped_tokens = tokens[:, top_1_minus_alpha_k:]
-        avg_pooled = torch.mean(normally_dropped_tokens, dim=1, keepdim=True)
-        return avg_pooled
+class TokenRouter(nn.Module):
+    def __init__(self, in_dim, hidden_dim=256, max_k=20):
+        super(TokenRouter, self).__init__()
+        self.max_k = max_k
+        
+        # Shared encoder
+        self.encoder = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.ReLU()
+        )
+        
+        # Alpha predictor (0-1)
+        self.alpha_predictor = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim//2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim//2, 1),
+            nn.Sigmoid()
+        )
+        
+        # K predictor (positive integer)
+        self.k_predictor = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim//2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim//2, 1),
+            nn.Softplus()
+        )
+    
+    def forward(self, tokens, cls_token=None):
+        # Use cls_token or mean of tokens as input
+        if cls_token is not None:
+            router_input = cls_token
+        else:
+            router_input = tokens.mean(dim=1)
+        
+        features = self.encoder(router_input)
+        
+        # Predict alpha value (0,1)
+        alpha = self.alpha_predictor(features).squeeze(-1)
+        
+        # Predict k value (bounded integer)
+        k_raw = self.k_predictor(features).squeeze(-1)
+        k = torch.clamp(torch.round(k_raw), min=1, max=self.max_k).long()
+        
+        return alpha, k
 
 
 class ATSA(nn.Module):
-    def __init__(self, in_dim, alpha=0.5, k=10, hidden_dim=256):
+    def __init__(self, in_dim, hidden_dim=256, max_k=20):
         super(ATSA, self).__init__()
-        self.alpha = alpha
-        self.k = k
         
+        # Dynamic parameter prediction
+        self.router = TokenRouter(in_dim, hidden_dim, max_k)
+        
+        # Priority Allocator
         self.priority_allocator = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
-            nn.Softmax(dim=1)
+            nn.Linear(hidden_dim, 1)
         )
+        self.softmax = nn.Softmax(dim=1)
         
+        # Selective Refiner
         self.selective_refiner = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, in_dim)
         )
         
+        # Adaptive pooling
         self.adaptive_pool = nn.AdaptiveAvgPool1d(1)
         
-        self.fusion_layer = nn.Linear(in_dim, in_dim)
-
-    def forward(self, tokens, cls_token=None, threshold=0.5):
+        # Final projection
+        self.final_mlp = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, in_dim)
+        )
+        
+    def forward(self, tokens, cls_token=None, threshold=None):
         B, N, C = tokens.shape
         
-        token_scores = self.priority_allocator(tokens).squeeze(-1)
+        # Dynamically determine alpha and k
+        alpha, k = self.router(tokens, cls_token)
+        k = torch.clamp(k, max=N)
         
-        top_k_values, top_k_indices = torch.topk(token_scores, self.k, dim=1)
+        # Calculate token importance scores
+        token_importance = self.priority_allocator(tokens).squeeze(-1)
+        token_scores = self.softmax(token_importance)
         
-        top_alpha_k = int(self.alpha * self.k)
+        final_outputs = []
         
-        refined_tokens_indices = top_k_indices[:, :top_alpha_k]
-        batch_indices = torch.arange(B).unsqueeze(1).expand(-1, top_alpha_k).to(tokens.device)
-        refined_tokens = tokens[batch_indices, refined_tokens_indices]
-        refined_output = self.selective_refiner(refined_tokens)
+        for b in range(B):
+            current_alpha = alpha[b]
+            current_k = k[b]
+            
+            # Select Top-K tokens
+            top_k_scores, top_k_indices = torch.topk(token_scores[b], current_k, dim=0)
+            
+            # Split into Top α·K and Top (1-α)·K
+            top_alpha_k = max(1, int(current_alpha * current_k))
+            
+            # Process Top α·K tokens with Selective Refiner
+            top_alpha_k_indices = top_k_indices[:top_alpha_k]
+            top_alpha_k_tokens = tokens[b, top_alpha_k_indices]
+            refined_tokens = self.selective_refiner(top_alpha_k_tokens.unsqueeze(0)).squeeze(0)
+            
+            # Get Top (1-α)·K tokens
+            remaining_k = current_k - top_alpha_k
+            if remaining_k > 0:
+                top_remaining_indices = top_k_indices[top_alpha_k:current_k]
+                top_remaining_tokens = tokens[b, top_remaining_indices]
+            else:
+                top_remaining_tokens = torch.empty((0, C), device=tokens.device)
+            
+            # Get Non-Top K tokens
+            non_top_k_mask = torch.ones(N, device=tokens.device).bool()
+            non_top_k_mask[top_k_indices] = False
+            non_top_indices = torch.where(non_top_k_mask)[0]
+            if len(non_top_indices) > 0:
+                non_top_tokens = tokens[b, non_top_indices]
+            else:
+                non_top_tokens = torch.empty((0, C), device=tokens.device)
+            
+            # Combine Top (1-α)·K and Non-Top K tokens
+            combined_tokens = torch.cat([top_remaining_tokens, non_top_tokens], dim=0) if len(non_top_tokens) > 0 else top_remaining_tokens
+            
+            # Apply adaptive pooling to combined tokens
+            if combined_tokens.size(0) > 0:
+                pooled_combined = self.adaptive_pool(combined_tokens.t().unsqueeze(0)).squeeze(0).t()
+            else:
+                pooled_combined = torch.zeros((1, C), device=tokens.device)
+            
+            # Concatenate refined tokens with pooled tokens
+            final_tokens = torch.cat([refined_tokens, pooled_combined], dim=0)
+            final_output = final_tokens.mean(dim=0)
+            final_outputs.append(final_output)
         
-        non_top_k_mask = torch.ones(B, N, device=tokens.device).bool()
-        non_top_k_mask[batch_indices, top_k_indices] = False
-        non_top_tokens = tokens[non_top_k_mask].view(B, -1, C)
-        pooled_output = self.adaptive_pool(non_top_tokens.transpose(1, 2)).transpose(1, 2)
+        # Process batch results
+        aggregated_features = torch.stack(final_outputs, dim=0)
+        output = self.final_mlp(aggregated_features)
         
-        remaining_top_indices = top_k_indices[:, top_alpha_k:]
-        batch_indices_remaining = torch.arange(B).unsqueeze(1).expand(-1, self.k - top_alpha_k).to(tokens.device)
-        remaining_top_tokens = tokens[batch_indices_remaining, remaining_top_indices]
-        
-        final_output = torch.cat([refined_output, remaining_top_tokens, pooled_output], dim=1)
-        aggregated_output = self.fusion_layer(final_output.mean(dim=1))
-        
-        return aggregated_output
+        return output
 
 
 class LMF(nn.Module):

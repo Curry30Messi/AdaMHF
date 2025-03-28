@@ -209,36 +209,13 @@ class Engine(object):
             event_times[batch_index] = event_times_batch
             total_loss += loss.item()
             euclidean_params = [p for name, p in model.named_parameters() if 'hyperbolic' not in name]
-            # hyperbolic_params = [p for name, p in model.named_parameters() if 'hyperbolic' in name]
-            #
-            # # 定义优化器
-            # optimizer_euclidean = torch.optim.SGD(filter(lambda p: p.requires_grad, euclidean_params), lr=self.args.lr, momentum=0.9, weight_decay=self.args.weight_decay)
-            # 假设 optimizer 已经定义
-            # 首先清空 optimizer 的 param_groups
+
             optimizer.param_groups.clear()
 
-            # 然后只将 euclidean_params 添加到 optimizer 中
+ 
             optimizer.add_param_group({'params': euclidean_params})
 
-            # optimizer_euclidean = torch.optim.Adam(
-            #     filter(lambda p: p.requires_grad, euclidean_params),
-            #     lr=self.args.lr,
-            #     weight_decay=self.args.weight_decay
-            # )
-
-            # optimizer_hyperbolic = RiemannianAdam(hyperbolic_params, lr=0.001)
-            # =======================================
-
-
-            # for name, parms in model.named_parameters():
-            #     if parms.grad is not None:
-            #         print('-->name:', name, '-->grad_requirs:', parms.requires_grad, '--weight', torch.mean(parms.data),
-            #               ' -->grad_value:', torch.mean(parms.grad))
-            #     else:
-            #         print('-->name:', name, '-->grad_requirs:', parms.requires_grad, '--weight', torch.mean(parms.data),
-            #               ' -->grad_value: None', )
             optimizer.zero_grad()
-            # optimizer_hyperbolic.zero_grad()
             loss.backward()
             optimizer.step()
 
@@ -288,119 +265,18 @@ class Engine(object):
                 )
 
                 survival_loss = loss_function[0](hazards=hazards, S=survival_prob, Y=labels, c=censorships_batch)
-            # combined_features = torch.cat((P_hat, G_hat), dim=1)
-            # combined_features=combined_features.unsqueeze(1)
-            # # combined_features=self.projector(combined_features)
-            # features = self.classifier_model.text_model(inputs_embeds=combined_features).last_hidden_state[:, 0, :]  # 使用[CLS]token
-            # features = features.squeeze(1)
-            # risk_predictions = self.classification_head(features)
-            # risk_predictions = (risk_predictions > 0.5).long()
+
 
                 similarity_loss_P = loss_function[1](predictions.detach(), predicted_probs)
                 similarity_loss_G = loss_function[1](group_predictions.detach(), group_predicted_probs)
                 loss = survival_loss + self.config.alpha * (similarity_loss_P + similarity_loss_G)
 
-            # print("risk: ",risk)
-            # risk_labels = (risk > 0.5).long()
-            # print("risk_labels: ",risk_labels)
-            # print("risk_predictions: ",risk_predictions)
-            # classification_loss = self.classification_criterion(risk_predictions, risk_labels)
-            # print("classification_loss: ",classification_loss)
+
                 risk = -torch.sum(survival_prob, dim=1).detach().cpu().numpy()
                 risk_scores[batch_index] = risk
                 censorships[batch_index] = censorships_batch.item()
                 event_times[batch_index] = event_times_batch
                 total_loss += loss.item()
-
-#   for i in range(attn_weights.shape[0]):
-#                 row, col = divmod(i, 4)  # 2 行 4 列
-#                 ax = fig.add_subplot(spec[row, col])
-#                 attn_map = attn_weights[i].detach().cpu().numpy()  # 转为 NumPy 数组
-#                 im = ax.imshow(attn_map, cmap="hot", interpolation="nearest", vmin=vmin, vmax=vmax)  # 统一颜色范围
-#                 ax.set_title(f"Head {i}", fontsize=10)
-#                 ax.set_xlabel("Token", fontsize=8)
-#                 ax.set_ylabel("Token", fontsize=8)
-#                 axes.append(ax)
-
-#             # 添加统一的颜色条
-#             cbar_ax = fig.add_subplot(spec[:, 4])  # 在右侧预留一列用于颜色条
-#             cbar = fig.colorbar(im, cax=cbar_ax)
-#             cbar.set_label("Attention Weight", fontsize=12)
-#             output_dir = f'results_heatmap/_{dataset}/_{self.time}_alpha{self.args.alpha}_modality{self.args.modality}_Rate{self.args.Rate}_epoch{self.args.num_epoch}/test'
-#             os.makedirs(output_dir, exist_ok=True)
-#             output_path = os.path.join(output_dir,  f"__{self.fold}__.png")
-#             plt.savefig(output_path, dpi=600)
-#             plt.close(fig)
-
-
-#             # survival loss + sim loss + sim loss
-#             sur_loss = criterion[0](hazards=hazards, S=S, Y=label, c=c)
-#             sim_loss_P = criterion[1](P.detach(), P_hat)
-#             sim_loss_G = criterion[1](G.detach(), G_hat)
-#             loss = sur_loss + self.args.alpha * (sim_loss_P + sim_loss_G)
-#             if self.args.MoELoss:
-#                 loss+=self.args.LossRate*MLoss
-#             # print("======================validate==================")
-#             # print("loss:",loss)
-#             # print("sur_loss:",sur_loss)
-#             # print("self.args.alpha * (sim_loss_P + sim_loss_G)",self.args.alpha * (sim_loss_P + sim_loss_G))
-#             print("S: ",S)
-#             risk = -torch.sum(S, dim=1).cpu().numpy()
-#             print("risk: ",risk)
-#             all_risk_scores[batch_idx] = risk
-#             all_censorships[batch_idx] = c.cpu().numpy()
-#             all_event_times[batch_idx] = event_time
-#             val_loss += loss.item()
-
-#         if epoch == self.args.num_epoch - 2:
-#             plt.clf()
-#             # 打印数据长度
-#             print("all_censorships", len(all_censorships))
-#             print("all_event_times", len(all_event_times))
-#             print("all_risk_scores", len(all_risk_scores))
-
-#             # 复制数据以避免修改原始数据
-#             all_censorships_temp = all_censorships.copy()
-#             all_event_times_temp = all_event_times.copy()
-#             all_risk_scores_temp = all_risk_scores.copy()
-
-#             kmf = KaplanMeierFitter()
-#             median_risk = np.median(all_risk_scores_temp)
-
-#             low_risk_group = all_risk_scores_temp >= median_risk
-#             high_risk_group = all_risk_scores_temp < median_risk
-
-#             # 绘制低风险组生存曲线
-#             kmf.fit(all_event_times_temp[low_risk_group], all_censorships_temp[low_risk_group], label="Low Risk")
-#             ax = kmf.plot_survival_function()
-
-#             # 绘制高风险组生存曲线
-#             kmf.fit(all_event_times_temp[high_risk_group], all_censorships_temp[high_risk_group], label="High Risk")
-#             kmf.plot_survival_function(ax=ax)
-
-#             # 使用log-rank test计算p-value
-#             results = logrank_test(all_event_times_temp[low_risk_group], all_event_times_temp[high_risk_group],
-#                                    event_observed_A=all_censorships_temp[low_risk_group],
-#                                    event_observed_B=all_censorships_temp[high_risk_group])
-
-#             p_value_text = f'p-value: {results.p_value:.1e}'
-#             plt.text(0.6, 0.2, p_value_text, transform=ax.transAxes, fontsize=16,  # 增大 p-value 字体
-#                      bbox=dict(facecolor='white', alpha=0.5))
-
-#             plt.xlabel('Time (months)', fontsize=14)  # 增大 x 轴标签字体
-#             plt.ylabel('Overall Survival', fontsize=14)  # 增大 y 轴标签字体
-
-#             # 增加图例并设置字体大小
-#             plt.legend(fontsize=12)  # 设置图例字体大小
-#             # 保存图像
-#             dataset = dataset[4:]
-#             output_dir = f'results_img/_{dataset}/_{self.time}_alpha{self.args.alpha}_modality{self.args.modality}_Rate{self.args.Rate}_epoch{self.args.num_epoch}/test'
-#             os.makedirs(output_dir, exist_ok=True)
-#             output_path = os.path.join(output_dir,  f"__{self.fold}__.png")
-#             plt.savefig(output_path, bbox_inches='tight', pad_inches=0.1)
-#             # plt.show()
-
-#             print(f"img saved to: {output_path}")
 
 
         mean_loss = total_loss / len(data_loader)

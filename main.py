@@ -3,7 +3,7 @@ import sys
 import csv
 import time
 import numpy as np
-from dataset import Generic_MIL_Survival_Dataset
+from dataset import MIL_Survival_Dataset
 from options import parse_args
 from util import get_split_loader, set_seed
 from loss import define_loss
@@ -70,7 +70,7 @@ def main(args):
     temp_time = current_time()
 
     for fold in range(5):
-        dataset = Generic_MIL_Survival_Dataset(
+        dataset = MIL_Survival_Dataset(
             csv_path=f"./csv/{args.dataset}_all_clean.csv",
             modal=args.modal,
             OOM=args.OOM,

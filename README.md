@@ -6,7 +6,9 @@ Adaptive Multi-modal Hierarchical Fusion for Survival Analysis
 ## Overview
 AdaMHF (Adaptive Multimodal Hierarchical Fusion for Survival Prediction) is a deep learning framework designed for survival analysis using multi-modal data from whole slide images (WSIs) and genomic profiles. The framework adaptively fuses features from different modalities to improve survival prediction accuracy.
 
-More details to be added.
+More model details, complete code, and process for preprocessing with CLAM are waiting to be added. Please stay tuned.
+
+
 
 ## Installation
 ### Prerequisites

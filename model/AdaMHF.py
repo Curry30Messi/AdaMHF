@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from util import initialize_weights, NystromAttention, BilinearFusion, SNN_Block, MultiheadAttention
+from model.util import initialize_weights, NystromAttention, BilinearFusion, SNN_Block, MultiheadAttention
 from torchvision.models import vit_large_patch16_224
 
 # ==

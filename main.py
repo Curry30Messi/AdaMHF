@@ -3,12 +3,12 @@ import sys
 import csv
 import time
 import numpy as np
-from dataset import MIL_Survival_Dataset
-from options import parse_args
-from util import get_split_loader, set_seed
-from loss import define_loss
-from optimizer import define_optimizer
-from scheduler import define_scheduler
+from utils.dataset import MIL_Survival_Dataset
+from utils.options import parse_args
+from model.util import get_split_loader, set_seed
+from utils.loss import define_loss
+from utils.optimizer import define_optimizer
+from utils.scheduler import define_scheduler
 from datetime import datetime
 
 # ==
@@ -100,8 +100,8 @@ def main(args):
         print(f"Training: {len(train_dataset)}, Validation: {len(val_dataset)}")
 
         if args.model == "AdaMHF":
-            from AdaMHF import AdaMHF
-            from engine import Engine
+            from model.AdaMHF import AdaMHF
+            from model.engine import Engine
 
             print(train_dataset.omic_sizes)
             model_config = {

@@ -10,18 +10,10 @@ More model details, complete code, and process for preprocessing with CLAM are w
 
 
 
-## Installation
-### Prerequisites
-```bash
-Python >= 3.7
-PyTorch >= 1.12.1+cu113
-scikit-survival >= 0.19.0
-```
-
 ### Data Preparation
 #### Whole Slide Images (WSIs)
 1. Download WSIs from [TCGA](https://portal.gdc.cancer.gov/)
-2. Extract features using the WSI processing pipeline from [CLAM](https://github.com/mahmoodlab/CLAM)
+2. Extract features using the WSI processing pipeline from [CLAM](https://github.com/mahmoodlab/CLAM) ( We have chosen VIT-based CLAM for preprocessing. )
 3. Save extracted features as .pt files for each WSI
 
 Required data structure:
@@ -35,12 +27,18 @@ DATA_ROOT_DIR/
 Note: Specify DATA_ROOT_DIR using the --data_root_dir argument in run.sh
 
 #### Genomic Data
-The framework uses genomic profiles provided by [PIBD](https://github.com/zylbuaa/PIBD). Store these profiles in the csv/ directory.
+To ensure proper formatting, download the gene data from [cBioPortal](https://www.cbioportal.org/). Store these profiles in the csv/ directory.
+
+At the same time, please ensure that the gene and WSIs compatibility.
 
 ## Cross-Validation
 The model employs 5-fold cross-validation. Prepare the splits in advance and store them in the `splits/5foldcv` directory.
 
 ## Training
+
+Due to the temporary unavailability of the server, we are unable to provide the corresponding environment files. It is recommended that your environment be set to PyTorch version 2.4.0 or higher, and that you install compatible packages to avoid encountering strange errors such as “NoneType” or similar issues.
+
+
 To train the model:
 ```bash
 bash run.sh
@@ -64,5 +62,5 @@ We thank the authors of the following open-source projects:
 
 
 ## Contact
-For questions and issues, please open an issue in this repository.
+For questions and issues, please open an issue in this repository or report issues directly (for urgent blockers) to 2316072618@qq.com.
 

@@ -4,6 +4,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Sampler, WeightedRandomSampler, RandomSampler, SequentialSampler
 
+# ==
+
 def collate_mil_survival(batch):
     images = torch.cat([item[0] for item in batch], dim=0)
     omics = torch.cat([item[1] for item in batch], dim=0).type(torch.FloatTensor)

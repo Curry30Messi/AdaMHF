@@ -45,7 +45,7 @@ To train the model:
 ```bash
 bash run.sh
 ```
-Customize training parameters by modifying run.sh
+Customize training parameters by modifying run.sh.
 
 ## Model Performance
 [ To be added ]

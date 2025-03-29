@@ -5,7 +5,7 @@ import numpy as np
 from util import initialize_weights, NystromAttention, BilinearFusion, SNN_Block, MultiheadAttention
 from torchvision.models import vit_large_patch16_224
 
-
+# ==
 
 class TransLayer(nn.Module):
     def __init__(self, norm_layer=nn.LayerNorm, dim=512):

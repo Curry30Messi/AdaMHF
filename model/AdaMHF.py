@@ -55,9 +55,11 @@ class SNNExpert(nn.Module):
 
 
 class FixedMLP(nn.Module):
-    def __init__(self):
+    def __init__(self, weight_path='./model.pth'):
         super(FixedMLP, self).__init__()
-        vit_model = vit_large_patch16_224(weights='IMAGENET1K_V1')
+        vit_model = vit_large_patch16_224(weights=None) 
+        if weight_path:
+            vit_model.load_state_dict(torch.load(weight_path)) 
         encoder_layer = vit_model.encoder.layers[0]
         self.in_dim = encoder_layer.fc1.in_features
         self.hidden_dim = encoder_layer.fc1.out_features
@@ -126,9 +128,9 @@ class PREEP(nn.Module):
             for b in range(batch_size):
                 selected_expert = self.expert_layers[layer_idx][max_indices[b]]
                 if len(mlp_out.shape) > 2:
-                    layer_output[b] = selected_expert(mlp_out[b].unsqueeze(0)).squeeze(0)
+                    layer_output[b] = selected_expert(x[b].unsqueeze(0)).squeeze(0)
                 else:
-                    layer_output[b] = selected_expert(mlp_out[b:b+1]).squeeze(0)
+                    layer_output[b] = selected_expert(x[b:b+1]).squeeze(0)
             
             x = mlp_out + layer_output
             x = self.activation(x)
@@ -178,9 +180,9 @@ class PREEG(nn.Module):
             for b in range(batch_size):
                 selected_expert = self.expert_layers[layer_idx][max_indices[b]]
                 if len(mlp_out.shape) > 2:
-                    layer_output[b] = selected_expert(mlp_out[b].unsqueeze(0)).squeeze(0)
+                    layer_output[b] = selected_expert(x[b].unsqueeze(0)).squeeze(0)
                 else:
-                    layer_output[b] = selected_expert(mlp_out[b:b+1]).squeeze(0)
+                    layer_output[b] = selected_expert(x[b:b+1]).squeeze(0)
             
             x = mlp_out + layer_output
             x = self.activation(x)
